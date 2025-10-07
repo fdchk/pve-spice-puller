@@ -99,6 +99,7 @@ fn get_vv(pve: &Pve, vm: u8) -> Response<std::io::Cursor<Vec<u8>>> {
     let body = res.into_body().read_to_string().unwrap();
     let json: Value = serde_json::from_str(&body).unwrap_or_else(|_| Value::Null);
 
+    
     if json["data"].is_null() {
         return Response::from_string(format!("pve responded wrong")).with_status_code(500);
     }
@@ -136,14 +137,16 @@ fn main() {
             panic!("conf load not ok");
         }
     }
-    let listen_addr = "0.0.0.0:8006";
+    let listen_addr = "0.0.0.0:8008";
     let server = Server::http(listen_addr).expect("failed to run server");
     println!("listening on {}/get_config", listen_addr);
 
     for request in server.incoming_requests() {
-        if request.url() == "/get_config" && request.method() == &tiny_http::Method::Get {
-            println!("serving a request from {}", request.remote_addr().unwrap());
-            let response = get_vv(&the_pve, 104);
+        if request.url().starts_with("/get_config") && request.method() == &tiny_http::Method::Get {
+            let id= request.url().split("/").last().expect("vm number is incorrect");
+            println!("serving a request from {}, providing config to {}", request.remote_addr().unwrap(), &id);
+            let vm: u8 = id.parse::<u8>().expect("vm number is bad");
+            let response = get_vv(&the_pve, vm);
             request.respond(response).unwrap();
         }
     }
