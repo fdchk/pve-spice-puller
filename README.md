@@ -17,6 +17,7 @@ i needed a way to let my colleagues to connect to "airgapped" vms but didn't wan
 not to be used in any serious deployment, this thing is so unsafe i wonder how rust even runs it
 
 - tls is forcefully disabled (!)
+- no auth apart from api token, vms are exposed to whoever has the .vv file
 - a lot of unwraps and not a lot of proper error handling
 - written by an idiot
 
