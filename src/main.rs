@@ -12,13 +12,12 @@ struct Pve {
 }
 
 fn read_env(path: &PathBuf) -> Result<(Pve, String), Error> {
-    let (
-        mut addr, 
-        mut name, 
-        mut token, 
-        mut node, 
-        mut listen_on
-    ) = None;
+    let mut addr : Option<String> = None;
+    let mut name : Option<String> = None;
+    let mut token : Option<String> = None;
+    let mut node : Option<String> = None;
+    let mut listen_on : Option<String> = None;
+
 
     let content = fs::read_to_string(path).map_err(|e| anyhow!("failed to open .env file {}", e))?;
     let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
