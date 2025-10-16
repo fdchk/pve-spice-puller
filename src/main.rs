@@ -134,7 +134,7 @@ fn main() {
         env_path.pop();
     }
     env_path.pop();
-    env_path.push(".env");
+    env_path.push(".config");
     
     match read_env(&env_path) {
         Ok((pve, listen_on)) => {

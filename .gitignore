@@ -1,5 +1,5 @@
 /target
 /.vscode/
-cargo.lock
+Сargo.lock
 .env
 /gitignore does not want to work wtf

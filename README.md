@@ -28,7 +28,7 @@ not to be used in any serious deployment, this thing is so unsafe i wonder how r
   - give this group `VM:Console` perms
   - assign this group to vm(s) you want to expose
 - pull
-- populate `.env.template` with credentials from PVE and other info, save as `.env`
+- populate `.config.template` with credentials from PVE and other info, save as `.config`
 - run it as is with `cargo run` in detached state
 - or `cargo build` and make a service out of this, i don't really care lol
 - go to `http://{your_webhook_address}/get_config/{vm_id}`
