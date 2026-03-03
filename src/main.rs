@@ -1,7 +1,7 @@
 use serde_json::Value;
 use semantic_exit::{exit, Code};
 use tiny_http::{Response, Server};
-use anyhow::{Error, Result, anyhow};
+use anyhow::{Context, Error, Result};
 use std::{env, fs, path::PathBuf, str::FromStr};
 use ureq::{config::Config, tls::{TlsConfig, TlsProvider}};
 
@@ -19,8 +19,7 @@ fn read_env(path: &PathBuf) -> Result<(Pve, String), Error> {
     let mut node : Option<String> = None;
     let mut listen_on : Option<String> = None;
 
-
-    let content = fs::read_to_string(path).map_err(|e| anyhow!("failed to open .env file {}", e))?;
+    let content: String = fs::read_to_string(path).context(format!("Failed to open .config: {}", path.display()))?;
     let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     for line in lines {
         if line.trim().is_empty() || line.trim().starts_with('#') {
@@ -84,7 +83,7 @@ fn assemble_vv(data: &Value, pve: &Pve) -> String {
     vv_content
 }
 
-fn get_vv(pve: &Pve, vm: u16) -> Response<std::io::Cursor<Vec<u8>>> {
+fn get_vv(pve: &Pve, vm: u16) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
     
     let config = Config::builder()
     .tls_config(
@@ -106,31 +105,27 @@ fn get_vv(pve: &Pve, vm: u16) -> Response<std::io::Cursor<Vec<u8>>> {
         {
             Ok(r) => r,
             Err(e) => {
-                return Response::from_string(format!("Something is wrong on PVE side: {}", e)).with_status_code(418)
+                return Ok(Response::from_string(format!("Something is wrong on PVE side: {}", e)).with_status_code(418))
             }
         };
     
-    // if let Err(e) = &res {
-
-    //     return Response::from_string(format!("Something is wrong on PVE side: {} \n Full response: {:?}", e, res)).with_status_code(418);
-    // }
     
     let res = res;
     let body = res.into_body().read_to_string().unwrap();
     let json: Value = serde_json::from_str(&body).unwrap_or_else(|_| Value::Null);
     
     if json["data"].is_null() {
-        return Response::from_string(format!("pve responded with nothing")).with_status_code(418);
+        return Ok(Response::from_string(format!("pve responded with nothing")).with_status_code(418))
     }
     
     let data = &json["data"];
     let header1: String = format!("Content-Type: application/x-virt-viewer");
     let header2: String = format!("Content-Disposition: attachment; filename=\"Connect_to_{}_vm.vv\"", vm.to_string());
     
-    Response::from_string(assemble_vv(data, &pve))
+    Ok(Response::from_string(assemble_vv(data, &pve))
                                 .with_header(tiny_http::Header::from_str(&header1).unwrap())
                                 .with_header(tiny_http::Header::from_str(&header2).unwrap())
-                                .with_status_code(200)
+                                .with_status_code(200))
 }
 
 fn main() {
@@ -171,7 +166,7 @@ fn main() {
             let id= request.url().split("/").last().expect("Vm number is incorrect"); //we are just assuming that everything is fine and dandy
             println!("serving a request from {}, providing config to {}", request.remote_addr().unwrap(), &id);
             let vm: u16 = id.parse::<u16>().unwrap_or_default();
-            let response = get_vv(&the_pve, vm);
+            let response = get_vv(&the_pve, vm).expect("temp faulty response");
             request.respond(response).unwrap();
         }
     }
