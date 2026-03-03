@@ -1,8 +1,9 @@
 use serde_json::Value;
+use semantic_exit::{exit, Code};
 use tiny_http::{Response, Server};
 use anyhow::{Error, Result, anyhow};
-use std::{fs, env, path::PathBuf, str::FromStr};
-use ureq::{tls::{TlsConfig, TlsProvider}, config::Config};
+use std::{env, fs, path::PathBuf, str::FromStr};
+use ureq::{config::Config, tls::{TlsConfig, TlsProvider}};
 
 struct Pve {
     address: String,
@@ -37,12 +38,12 @@ fn read_env(path: &PathBuf) -> Result<(Pve, String), Error> {
         }
     }
     let info = Pve { 
-        address: (String::from(addr.unwrap())), 
-        username: (String::from(name.unwrap())), 
-        token: (String::from(token.unwrap())),
-        node: (String::from(node.unwrap())), 
+        address: (String::from(addr.expect("Unable to get PVE address from .config"))), 
+        username: (String::from(name.expect("Unable to get PVE username from .config"))), 
+        token: (String::from(token.expect("Unable to get PVE token from .config"))),
+        node: (String::from(node.expect("Unable to get PVE node name from .config"))), 
     };
-    return Ok((info, listen_on.unwrap()));
+    return Ok((info, listen_on.expect("Unable to get port to listen on from .config")));
 }
 
 fn assemble_vv(data: &Value, pve: &Pve) -> String {
@@ -83,13 +84,13 @@ fn assemble_vv(data: &Value, pve: &Pve) -> String {
     vv_content
 }
 
-fn get_vv(pve: &Pve, vm: u8) -> Response<std::io::Cursor<Vec<u8>>> {
+fn get_vv(pve: &Pve, vm: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     
     let config = Config::builder()
     .tls_config(
         TlsConfig::builder()
         .provider(TlsProvider::Rustls)
-        .disable_verification(true)             // DANGER DANGER DANGER TODO: FIX THIS SHIT SOMEHOW
+        .disable_verification(true)             // DANGER DANGER DANGER 
         .build()
     )
     .build();
@@ -98,25 +99,33 @@ fn get_vv(pve: &Pve, vm: u8) -> Response<std::io::Cursor<Vec<u8>>> {
                                        pve.address, pve.node, vm.to_string());
 
     let agent = config.new_agent();
-    let res = agent.post(api)
-                                    .header("Authorization", &format!("PVEAPIToken={}={}", pve.username, pve.token))
-                                    .send_empty();
+
+    let res = match agent.post(api)
+    .header("Authorization", &format!("PVEAPIToken={}={}", pve.username, pve.token))
+    .send_empty()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                return Response::from_string(format!("Something is wrong on PVE side: {}", e)).with_status_code(418)
+            }
+        };
     
-    if let Err(e) = res {
-        return Response::from_string(format!("smth gone wrong on pve side: {}", e)).with_status_code(500);
-    }
+    // if let Err(e) = &res {
+
+    //     return Response::from_string(format!("Something is wrong on PVE side: {} \n Full response: {:?}", e, res)).with_status_code(418);
+    // }
     
-    let res = res.unwrap();
+    let res = res;
     let body = res.into_body().read_to_string().unwrap();
     let json: Value = serde_json::from_str(&body).unwrap_or_else(|_| Value::Null);
     
     if json["data"].is_null() {
-        return Response::from_string(format!("pve responded with nothing")).with_status_code(500);
+        return Response::from_string(format!("pve responded with nothing")).with_status_code(418);
     }
     
     let data = &json["data"];
     let header1: String = format!("Content-Type: application/x-virt-viewer");
-    let header2: String = format!("Content-Disposition: attachment; filename=\"console_{}.vv\"", vm.to_string());
+    let header2: String = format!("Content-Disposition: attachment; filename=\"Connect_to_{}_vm.vv\"", vm.to_string());
     
     Response::from_string(assemble_vv(data, &pve))
                                 .with_header(tiny_http::Header::from_str(&header1).unwrap())
@@ -125,10 +134,16 @@ fn get_vv(pve: &Pve, vm: u8) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn main() {
-    let the_pve:Pve;
-    let listen_addr;
-    let mut env_path = env::current_exe().expect("something wrong with the .env file");
-    // hack for locating .env both in dev and deploy
+    let mut the_pve: Pve = Pve { 
+        address: String::new(), 
+        username: String::new(), 
+        token: String::new(),
+        node: String::new(),
+    };
+    let mut listen_addr = String::new();
+    let mut env_path = env::current_exe().expect("Something is wrong around the executable, check perms");
+    // hack for locating .config both in dev and deploy
+    // beauregard lionett reference????
     if env_path.to_string_lossy().contains("target") {
         env_path.pop();
         env_path.pop();
@@ -138,23 +153,24 @@ fn main() {
     
     match read_env(&env_path) {
         Ok((pve, listen_on)) => {
-            println!("conf load ok");
+            println!("./config load OK");
             the_pve = pve; 
             listen_addr = listen_on;
         }
         Err(_) => {
-            panic!("conf load not ok");
+            println!("./config load not OK, exiting");
+            exit(Code::RequirementNotMet);
         }
     }
     
-    let server = Server::http(&listen_addr).expect("failed to run server");
-    println!("listening on {}/get_config/*vm_id*", &listen_addr);
+    let server = Server::http(&listen_addr).expect("Failed to run server");
+    println!("Listening on {}/get_config/*vm_id*", &listen_addr);
     
     for request in server.incoming_requests() {
         if request.url().starts_with("/get_config") && request.method() == &tiny_http::Method::Get {
-            let id= request.url().split("/").last().expect("vm number is incorrect"); //we are just assuming that everything is fine and dandy
+            let id= request.url().split("/").last().expect("Vm number is incorrect"); //we are just assuming that everything is fine and dandy
             println!("serving a request from {}, providing config to {}", request.remote_addr().unwrap(), &id);
-            let vm: u8 = id.parse::<u8>().expect("cant parse the vm number");
+            let vm: u16 = id.parse::<u16>().unwrap_or_default();
             let response = get_vv(&the_pve, vm);
             request.respond(response).unwrap();
         }
