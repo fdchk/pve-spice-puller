@@ -1,7 +1,7 @@
 use serde_json::Value;
 use semantic_exit::{exit, Code};
 use tiny_http::{Response, Server};
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Error, Result, anyhow};
 use std::{env, fs, path::PathBuf, str::FromStr};
 use ureq::{config::Config, tls::{TlsConfig, TlsProvider}};
 
@@ -111,14 +111,16 @@ fn get_vv(pve: &Pve, vm: u16) -> Result<Response<std::io::Cursor<Vec<u8>>>, Erro
     
     
     let res = res;
-    let body = res.into_body().read_to_string().unwrap();
-    let json: Value = serde_json::from_str(&body).unwrap_or_else(|_| Value::Null);
+    let body = res.into_body().read_to_string().context("Failed to read PVE response")?;
+    let json: Value = serde_json::from_str(&body).context("Failed to parse PVE response as JSON")?;
     
-    if json["data"].is_null() {
-        return Ok(Response::from_string(format!("pve responded with nothing")).with_status_code(418))
-    }
+    let data = json.get("data").ok_or_else(|| anyhow!("PVE response missing 'data' field"))?;
+
+    // if json["data"].is_null() {
+    //     return Ok(Response::from_string(format!("pve responded with nothing")).with_status_code(418))
+    // }
     
-    let data = &json["data"];
+    // let data = &json["data"];
     let header1: String = format!("Content-Type: application/x-virt-viewer");
     let header2: String = format!("Content-Disposition: attachment; filename=\"Connect_to_{}_vm.vv\"", vm.to_string());
     
