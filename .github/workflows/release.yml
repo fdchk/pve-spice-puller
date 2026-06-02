@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    branches: [ "release" ]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+    - name: Build
+      run: cargo build --verbose --release
+    - name: Determine release tag
+      run: |
+        BASE_TAG="v$(grep '^version = ' Cargo.toml | sed 's/version = \"\(.*\)\"/\1/')"
+        git fetch --tags --force
+        if git tag -l "$BASE_TAG" | grep -q .; then
+          MAX_P=$(git tag -l "${BASE_TAG}-p*" | sed 's/.*-p//' | sort -n | tail -1)
+          if [ -z "$MAX_P" ]; then
+            TAG="${BASE_TAG}-p1"
+          else
+            TAG="${BASE_TAG}-p$((MAX_P + 1))"
+          fi
+        else
+          TAG="$BASE_TAG"
+        fi
+        echo "TAG=$TAG" >> $GITHUB_ENV
+    - name: Package
+      run: |
+        mkdir bin
+        cp target/release/pve_spice_puller bin/pve-spice-puller
+        zip -r psp_bin.zip bin
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.TAG }}
+        make_latest: true
+        token: ${{ secrets.RELEASER_TOKEN }}
+        files: psp_bin.zip
