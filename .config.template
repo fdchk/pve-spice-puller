@@ -3,3 +3,4 @@ name        = <token id>
 token       = <token secret>
 node        = <node name>
 listen-on   = <where to listen for webhook, ip:port>
+ca-cert     = <path to pve ca cert .pem, optional>
