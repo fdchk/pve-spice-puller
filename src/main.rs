@@ -43,13 +43,14 @@ fn read_env(path: &PathBuf) -> Result<(Pve, String), Error> {
         }
     }
     let info = Pve {
-        address: addr.unwrap(),
-        username: name.unwrap(),
-        token: token.unwrap(),
-        node: node.unwrap(),
+        address: addr.ok_or_else(|| anyhow!("missing required config key: pve"))?,
+        username: name.ok_or_else(|| anyhow!("missing required config key: name"))?,
+        token: token.ok_or_else(|| anyhow!("missing required config key: token"))?,
+        node: node.ok_or_else(|| anyhow!("missing required config key: node"))?,
         ca_cert,
     };
-    Ok((info, listen_on.unwrap()))
+    let listen = listen_on.ok_or_else(|| anyhow!("missing required config key: listen-on"))?;
+    Ok((info, listen))
 }
 
 fn assemble_vv(data: &Value, pve: &Pve) -> String {
@@ -122,7 +123,7 @@ fn build_tls_config(pve: &Pve, no_cert: bool) -> Result<TlsConfig, Error> {
         .build())
 }
 
-fn get_vv(pve: &Pve, vm: u8, no_cert: bool) -> Response<std::io::Cursor<Vec<u8>>> {
+fn get_vv(pve: &Pve, vm: u32, no_cert: bool) -> Response<std::io::Cursor<Vec<u8>>> {
     let tls_config = match build_tls_config(pve, no_cert) {
         Ok(c) => c,
         Err(e) => {
@@ -154,7 +155,10 @@ fn get_vv(pve: &Pve, vm: u8, no_cert: bool) -> Response<std::io::Cursor<Vec<u8>>
         }
     };
 
-    let body = res.into_body().read_to_string().unwrap();
+    let body = match res.into_body().read_to_string() {
+        Ok(b) => b,
+        Err(e) => return Response::from_string(format!("failed to read pve response: {}", e)).with_status_code(500),
+    };
     let json: Value = serde_json::from_str(&body).unwrap_or_else(|_| Value::Null);
 
     if json["data"].is_null() {
@@ -180,10 +184,12 @@ fn main() {
         match args[i].as_str() {
             "--no-cert" => no_cert = true,
             "--config" => {
+                if i + 1 >= args.len() {
+                    eprintln!("error: --config requires a path argument");
+                    return;
+                }
                 i += 1;
-                config_path = Some(PathBuf::from(
-                    args.get(i).expect("--config requires a path argument"),
-                ));
+                config_path = Some(PathBuf::from(&args[i]));
             }
             _ => {}
         }
@@ -219,12 +225,31 @@ fn main() {
 
     for request in server.incoming_requests() {
         if request.url().starts_with("/get_config") && request.method() == &tiny_http::Method::Get {
-            let id = request.url().split("/").last().expect("vm number is incorrect");
-            println!("serving a request from {}, providing config to {}",
-                request.remote_addr().unwrap(), &id);
-            let vm: u8 = id.parse::<u8>().expect("cant parse the vm number");
+            let addr = request.remote_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let vm_segment = request.url().split("/").last().unwrap_or("");
+            if vm_segment.is_empty() || vm_segment == "get_config" {
+                let _ = request.respond(
+                    Response::from_string("missing vm id").with_status_code(400));
+                continue;
+            }
+
+            let vm: u32 = match vm_segment.parse() {
+                Ok(id) => id,
+                Err(_) => {
+                    let _ = request.respond(
+                        Response::from_string("invalid vm id").with_status_code(400));
+                    continue;
+                }
+            };
+
+            println!("serving a request from {}, providing config to {}", addr, vm);
             let response = get_vv(&the_pve, vm, no_cert);
-            request.respond(response).unwrap();
+            if let Err(e) = request.respond(response) {
+                eprintln!("failed to respond to {}: {}", addr, e);
+            }
         }
     }
 }

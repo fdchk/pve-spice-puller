@@ -33,9 +33,21 @@ tls is no longer a joke (mostly)
 
 - `native-tls` dependency (was never used, lol)
 - the `DANGER DANGER DANGER TODO: FIX THIS SHIT SOMEHOW` comment (finally)
+- a bunch of panics that should've been proper errors all along
 
 ### changed
 
 - tls provider stays on rustls but now actually verifies certificates
 - default behavior changed: verification on, system certs loaded
 - error messages now include actual error details instead of silent panics
+- missing config keys now print which key is missing instead of cryptic unwrap panic
+- vm id changed from `u8` to `u32` (for people with more than 255 vms, i guess)
+
+### fixed
+
+- `/get_config` with no vm id now returns 400 instead of crashing
+- bad vm id now returns 400 instead of crashing
+- client disconnect mid-request no longer kills the daemon (just logs and moves on)
+- `--config` as the last argument no longer panics
+- body read failure returns 500 instead of crashing
+- request.remote_addr() fallback to "unknown" instead of panic
